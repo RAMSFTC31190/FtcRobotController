@@ -12,12 +12,15 @@ import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.DistanceUnit;
 import org.firstinspires.ftc.robotcore.external.navigation.Pose2D;
 
+// --- HUSKYLENS IMPORTS ---
+import com.qualcomm.hardware.dfrobot.HuskyLens;
 import java.util.Locale;
 
 @TeleOp(name = "DecodeTeleop", group = "Competition")
 public class decodemaster extends LinearOpMode {
 
     GoBildaPinpointDriver odo;
+    HuskyLens huskyLens; // Define HuskyLens
 
     @Override
     public void runOpMode() throws InterruptedException {
@@ -33,6 +36,14 @@ public class decodemaster extends LinearOpMode {
         Servo ballStopper = hardwareMap.get(Servo.class, "ballStopper");
         DcMotor belt = hardwareMap.get(DcMotor.class, "belt");
         DcMotor intake = hardwareMap.get(DcMotor.class, "intake");
+
+        // --- HUSKYLENS MAPPING ---
+        huskyLens = hardwareMap.get(HuskyLens.class, "huskylens");
+
+        // --- HUSKYLENS SETUP ---
+        // Important: Set the algorithm. Options: COLOR_RECOGNITION, TAG_RECOGNITION, OBJECT_TRACKING
+        // Change this based on what you trained the camera to see!
+        huskyLens.selectAlgorithm(HuskyLens.Algorithm.COLOR_RECOGNITION);
 
         // --- MOTOR SETUP ---
         frontLeftMotor.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -57,17 +68,9 @@ public class decodemaster extends LinearOpMode {
         // --- PINPOINT ODOMETRY SETUP ---
         // =========================================================
         odo = hardwareMap.get(GoBildaPinpointDriver.class, "Pinpoint");
-
-        // STEP 1: Set the Offset from the center of the robot
-        // MEASURE THESE ON YOUR ROBOT! (In Millimeters)
         odo.setOffsets(-84.0, -168.0, DistanceUnit.MM);
-
-        // STEP 2: Set the Encoder type
         odo.setEncoderResolution(GoBildaPinpointDriver.GoBildaOdometryPods.goBILDA_4_BAR_POD);
-
-        // STEP 3: Set Direction.
         odo.setEncoderDirections(GoBildaPinpointDriver.EncoderDirection.FORWARD, GoBildaPinpointDriver.EncoderDirection.FORWARD);
-
         odo.resetPosAndIMU();
         // =========================================================
 
@@ -84,6 +87,41 @@ public class decodemaster extends LinearOpMode {
             double y = gamepad1.right_stick_y;
             double x = -gamepad1.right_stick_x;
             double rx = -gamepad1.left_stick_x;
+
+            // --- AUTO AIM LOGIC (OVERRIDES MANUAL ROTATION) ---
+            // If you hold Left Bumper on Gamepad 1, the robot aims automatically
+            if (gamepad1.left_bumper) {
+                HuskyLens.Block[] blocks = huskyLens.blocks();
+
+                if (blocks.length > 0) {
+                    // 1. Get the target (assume the first block seen is the target)
+                    HuskyLens.Block target = blocks[0];
+
+                    // 2. Calculate Error
+                    // Screen width is 320. Center is 160.
+                    // If target.x is < 160, object is to the left (we need to turn left)
+                    // If target.x is > 160, object is to the right (we need to turn right)
+                    double targetX = target.x;
+                    double screenCenter = 160;
+                    double error = screenCenter - targetX;
+
+                    // 3. Calculate Turn Power (Proportional Control)
+                    // Kp is the "sensitivity". 0.003 is a safe starting point.
+                    // If it oscillates, lower it. If it's too slow, raise it.
+                    double Kp = 0.005;
+                    rx = error * Kp;
+
+                    // 4. Limit Max Turn Speed (optional safety)
+                    rx = Math.max(-0.5, Math.min(0.5, rx));
+
+                    telemetry.addData("Auto-Aim", "TARGET FOUND");
+                    telemetry.addData("Error", error);
+                } else {
+                    // No target found, stop turning (or let driver take over)
+                    rx = 0;
+                    telemetry.addData("Auto-Aim", "SEARCHING...");
+                }
+            }
 
             // --- RESET LOGIC ---
             if (gamepad1.start) {
@@ -150,4 +188,4 @@ public class decodemaster extends LinearOpMode {
             telemetry.update();
         } // End of While Loop
     } // End of runOpMode Method
-} // End of Class (This was the missing one!)
+}
